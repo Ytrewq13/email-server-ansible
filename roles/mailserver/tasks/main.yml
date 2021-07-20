@@ -1,0 +1,138 @@
+---
+# TODO: Automate postfix initial setup
+- name: Install Postfix
+  package:
+    name: postfix
+    state: present
+  tags: postfix
+
+- name: Ensure postfix is started and running
+  service:
+    name: postfix
+    state: started
+    enabled: true
+  tags: postfix
+
+- name: Check the default certificate directory
+  stat:
+    path: '{{ certdir_default }}'
+  register: certdir_default_check
+
+- name: Get the certificate directory
+  shell: >
+    dirname "$(certbot certificates 2>/dev/null |
+    grep "{{ maildomain }}\|*.{{ domain }}" -A 2 |
+    awk '/Certificate Path/ {print $3}' | head -n1)"
+  register: certdir_check
+  check_mode: false
+  when: not (certdir_derfault_check.exists is defined and certdir_default_check.exists and certdir_default_check.isdir)
+
+- name: Error if certificate not found
+  fail:
+    msg: |
+      'Note! You must first have a Let`s Encrypt Certbot HTTPS/SSL Certificate for {{ maildomain }}.'
+      'Use Let`s Encrypt`s Certbot to get that and then rerun this script.'
+      'You may need to set up a dummy {{ maildomain }} site in nginx for that to work.'
+  when: certdir_check is defined and certdir_check.stdout == ""
+
+- set_fact:
+    certdir: '{{ certdir_check.stdout }}'
+
+
+- name: Configure Postfix
+  import_tasks: postfix_config.yml
+  tags: postfix
+
+- name: Install Dovecot
+  package:
+    name:
+      - dovecot-imapd
+      - dovecot-sieve
+    state: present
+  tags: dovecot
+
+- name: Get dovecot version
+  command: dovecot --version
+  register: dovecot_version
+
+- name: Configure Dovecot
+  import_tasks: dovecot_config.yml
+  tags: dovecot
+
+- name: Install spam related programs
+  package:
+    name:
+      - spamassassin
+      - spamc
+    state: present
+  tags: spam
+
+- name: Install openDKIM
+  package:
+    name:
+      - opendkim
+      - opendkim-tools
+    state: present
+  tags: dkim
+
+- name: Configure OpenDKIM
+  import_tasks: opendkim_config.yml
+  tags: dkim
+
+- name: Disable and stop ufw
+  service:
+    name: ufw
+    state: stopped
+    enabled: false
+
+- name: 'Enable and start {{ item }}'
+  service:
+    name: '{{ item }}'
+    state: started
+    enabled: true
+  with_items:
+    - spamassassin
+    - dovecot
+    - postfix
+    - opendkim
+  tags:
+    - dkim
+    - postfix
+    - dovecot
+    - spam
+
+- name: 'Copy DNS TXT entries to {{ dns_entries_file }}'
+  block:
+    - stat:
+        path: '/etc/postfix/dkim/{{ subdom }}.txt'
+      register: dkim_subdom_txt
+    - shell:
+        cmd: >
+          cat '/etc/postfix/dkim/{{ subdom }}.txt' |
+          tr -d "\n" |
+          sed -e
+          's/k=rsa;.*"p=/k=rsa; p=/;
+           s/"\s*"//;
+           s/"\s*).*/\n/;
+           s/^.* p=/p=/'
+      check_mode: false
+      changed_when: false
+      register: pval_check
+      when: dkim_subdom_txt.stat.exists
+    - fail:
+        msg: Failed to determine pval
+      when: pval_check.stdout is not defined or pval_check.stdout == ""
+    - set_fact:
+        pval: '{{ pval_check.stdout }}'
+      when: pval_check.stdout is defined
+    - set_fact:
+        pval: PVAL_PLACEHOLDER_VALUE
+      when: pval is not defined
+    - template:
+        src: dns_TXT
+        dest: '{{ dns_entries_file }}'
+    - debug:
+        msg: >
+          "You should now create DNS TXT records as listed
+          in {{ dns_entries_file }} (one per line)"
+  tags: dns

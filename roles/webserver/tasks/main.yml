@@ -1,0 +1,23 @@
+---
+- name: Install nginx & certbot
+  apt:
+    pkg:
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+    state: present
+
+- name: Install rsync (used for syncing website files)
+  apt:
+    name: rsync
+    state: present
+
+- name: Configure nginx sites (TODO)
+  debug:
+    msg: foo
+  notify: restart nginx
+
+- name: Run certbot
+  debug:
+    msg: certbot --nginx
+# TODO: certbot ansible role?

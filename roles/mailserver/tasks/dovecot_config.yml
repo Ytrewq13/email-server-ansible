@@ -1,0 +1,43 @@
+---
+- name: Copy Dovecot config file
+  template:
+    src: dovecot.conf
+    dest: /etc/dovecot/dovecot.conf
+
+- name: Create the dovecot/sieve directory
+  file:
+    path: /var/lib/dovecot/sieve
+    state: directory
+
+- name: Configure the sieve
+  copy:
+    src: dovecot.sieve
+    dest: /var/lib/dovecot/sieve/default.sieve
+
+- name: Create vmail user
+  user:
+    name: vmail
+
+- name: Chown the /var/lib/dovecot directory to vmail user
+  file:
+    path: /var/lib/dovecot
+    owner: vmail
+    group: vmail
+    recurse: true
+
+# TODO: make this idempotent (and know when it has changed things)
+- name: Compile the sieve
+  command: sievec /var/lib/dovecot/sieve/default.sieve
+
+- name: Dovecot user authentication
+  block:
+    - shell: 'cat /etc/pam.d/dovecot'
+      register: pamd_dovecot
+    - blockinfile:
+        path: /etc/pam.d/dovecot
+        block: |
+          auth    required        pam_unix.so nullok
+          account required        pam_unix.so
+      when: pamd_dovecot.stdout is not defined or
+            'nullok' not in pamd_dovecot.stdout
+

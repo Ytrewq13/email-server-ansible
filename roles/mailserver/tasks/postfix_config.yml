@@ -1,0 +1,67 @@
+---
+- name: Configure postfix's main.cf file
+  # These are the `postconf` lines
+  lineinfile:
+    path: /etc/postfix/main.cf
+    regex: '{{ item.key }}'
+    line: '{{ item.key }} = {{ item.value }}'
+  with_dict:
+    smtpd_tls_key_file: "{{ certdir }}/privkey.pem"
+    smtpd_tls_cert_file: "{{ certdir }}/fullchain.pem"
+    smtpd_tls_security_level: "may"
+    smtpd_tls_auth_only: "yes"
+    smtp_tls_security_level: "may"
+    smtp_tls_loglevel: "1"
+    smtp_tls_CAfile: "{{ certdir }}/cert.pem"
+    smtpd_tls_mandatory_protocols: "!SSLv2, !SSLv3, !TLSv1, !TLSv1.1"
+    smtp_tls_mandatory_protocols: "!SSLv2, !SSLv3, !TLSv1, !TLSv1.1"
+    smtpd_tls_protocols: "!SSLv2, !SSLv3, !TLSv1, !TLSv1.1"
+    smtp_tls_protocols: "!SSLv2, !SSLv3, !TLSv1, !TLSv1.1"
+    tls_preempt_cipherlist: "yes"
+    smtpd_tls_exclude_ciphers: "aNULL, LOW, EXP, MEDIUM, ADH, AECDH, MD5, DSS, ECDSA, CAMELLIA128, 3DES, CAMELLIA256, RSA+AES, eNULL"
+    smtpd_sasl_auth_enable: "yes"
+    smtpd_sasl_type: "dovecot"
+    smtpd_sasl_path: "private/auth"
+    smtpd_recipient_restrictions: "permit_sasl_authenticated, permit_mynetworks, reject_unauth_destination"
+    home_mailbox: "Mail/Inbox/"
+    # Configs for OpenDKIM
+    smtpd_sasl_security_options: "noanonymous, noplaintext"
+    smtpd_sasl_tls_security_options: "noanonymous"
+    myhostname: "{{ maildomain }}"
+    mydestination: "{{ domain }}, localhost"
+    milter_default_action: "accept"
+    milter_protocol: "6"
+    smtpd_milters: "inet:localhost:12301"
+    non_smtpd_milters: "inet:localhost:12301"
+    mailbox_command: "/usr/lib/dovecot/deliver"
+  notify: restart postfix
+
+- name: Configure postfix's master.cf file
+  block:
+    - lineinfile:
+        path: /etc/postfix/master.cf
+        regexp: '{{ item }}'
+        state: absent
+      with_items:
+        - "^\\s*-o"
+        - "^\\s*submission"
+        - "^\\s*smtp"
+      notify: restart postfix
+    - blockinfile:
+        path: /etc/postfix/master.cf
+        block: |
+          smtp unix - - n - - smtp
+          smtp inet n - y - - smtpd
+            -o content_filter=spamassassin
+          submission inet n       -       y       -       -       smtpd
+            -o syslog_name=postfix/submission
+            -o smtpd_tls_security_level=encrypt
+            -o smtpd_sasl_auth_enable=yes
+            -o smtpd_tls_auth_only=yes
+          smtps     inet  n       -       y       -       -       smtpd
+            -o syslog_name=postfix/smtps
+            -o smtpd_tls_wrappermode=yes
+            -o smtpd_sasl_auth_enable=yes
+          spamassassin unix -     n       n       -       -       pipe
+            user=debian-spamd argv=/usr/bin/spamc -f -e /usr/sbin/sendmail -oi -f \${sender} \${recipient}
+      notify: restart postfix

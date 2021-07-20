@@ -1,0 +1,3 @@
+{{ subdom }}._domainkey.{{ domain }}	TXT	v=DKIM1; k=rsa; {{ pval }}
+_dmarc.{{ domain }}	TXT	v=DMARC1; p=reject; rua=mailto:dmarc@{{ domain }}; fo=1
+@	TXT	v=spf1 mx a:{{ maildomain }} -all

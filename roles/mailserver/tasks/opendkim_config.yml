@@ -1,0 +1,110 @@
+---
+- name: Create directory for OpenDKIM keys
+  file:
+    path: /etc/postfix/dkim
+    state: directory
+
+- name: Generate DKIM key
+  command: 'opendkim-genkey -D /etc/postfix/dkim/ -d {{ domain }} -s {{ subdom }}'
+  changed_when: true # FIXME
+
+- name: Chgrp on DKIM keys
+  file:
+    path: '{{ item }}'
+    group: opendkim
+    mode: g+r
+  with_fileglob:
+    - '/etc/postfix/dkim/*'
+
+- name: Configure OpenDKIM
+  block:
+    # Put the domain into the keytable
+    - command: 'grep -q {{ domain }} /etc/postfix/dkim/keytable'
+      check_mode: false
+      ignore_errors: true
+      register: domain_in_keytable
+    - lineinfile:
+        path: /etc/postfix/dkim/keytable
+        line: '{{ subdom }}._domainkey.{{ domain }} {{ domain }}:{{ subdom }}:/etc/postfix/dkim/{{ subdom }}.private'
+        create: true
+      notify:
+        - restart postfix
+        - restart opendkim
+      when: domain_in_keytable.rc is defined and domain_in_keytable.rc != 0
+    # Put the domain into the signing table
+    - command: 'grep -q {{ domain }} /etc/postfix/dkim/signingtable'
+      check_mode: false
+      ignore_errors: true
+      register: domain_in_signingtable
+    - lineinfile:
+        path: /etc/postfix/dkim/signingtable
+        line: '*@{{ domain }} {{ subdom }}._domainkey.{{ domain }}'
+        create: true
+      notify:
+        - restart postfix
+        - restart opendkim
+      when: domain_in_signingtable.rc is defined and domain_in_signingtable.rc != 0
+    # Put localhost in the trusted hosts file
+    - command: 'grep -q 127.0.0.1 /etc/postfix/dkim/trustedhosts'
+      check_mode: false
+      ignore_errors: true
+      register: localhost_in_trustedhosts
+    - blockinfile:
+        path: /etc/postfix/dkim/trustedhosts
+        block: |
+          127.0.0.1
+          10.1.0.0/16
+          1.2.3.4/24
+        create: true
+      notify:
+        - restart postfix
+        - restart opendkim
+      when: localhost_in_trustedhosts.rc is defined and localhost_in_trustedhosts.rc != 0
+    # Put dkim files into opendkim config
+    - command: 'grep -q "^KeyTable" /etc/opendkim.conf'
+      check_mode: false
+      ignore_errors: true
+      register: keytable_in_opendkim_conf
+    - blockinfile:
+        path: /etc/opendkim.conf
+        block: |
+          KeyTable file:/etc/postfix/dkim/keytable
+          SigningTable refile:/etc/postfix/dkim/signingtable
+          InternalHosts refile:/etc/postfix/dkim/trustedhosts
+        create: true
+      notify: restart opendkim
+      when: keytable_in_opendkim_conf is defined and keytable_in_opendkim_conf != 0
+    # Replace some things in opendkim config
+    - replace:
+        path: /etc/opendkim.conf
+        regexp: '(^#Canonicalization.*)(simple.*$)'
+        replace: '\1relaxed/\2'
+      notify: restart opendkim
+    - replace:
+        path: /etc/opendkim.conf
+        regexp: '^#(Canonicalization.*$)'
+        replace: '\1'
+      notify: restart opendkim
+    - replace:
+        path: /etc/opendkim.conf
+        regexp: '^#*(.*Socket.*$)'
+        replace: '#\1'
+      notify: restart opendkim
+    - lineinfile:
+        path: /etc/opendkim.conf
+        regexp: '^Socket\s*inet:12301@localhost'
+        line: 'Socket inet:12301@localhost'
+      notify: restart opendkim
+    # OpenDKIM daemon settings, remove previously activated socket
+    - lineinfile:
+        path: /etc/default/opendkim
+        regexp: '^SOCKET'
+        line: 'SOCKET="inet:12301@localhost"'
+      notify: restart opendkim
+
+- name: Chown /etc/postfix/dkim
+  file:
+    path: /etc/postfix/dkim
+    owner: opendkim
+    group: opendkim
+    recurse: true

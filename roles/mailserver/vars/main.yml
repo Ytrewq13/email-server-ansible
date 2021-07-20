@@ -1,0 +1,6 @@
+---
+subdom: mail
+maildomain: '{{ subdom }}.{{ domain }}'
+certdir_default: '/etc/letsencrypt/live/{{ maildomain }}'
+
+dns_entries_file: '/root/dns_TXT'
