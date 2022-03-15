@@ -31,8 +31,26 @@ Tested on Ubuntu server
 server. If your mail will be accessed at `mail.mydomain.xyz` then the line
 should read `domain: mydomain.xyz`
 
+### Setup Nginx sites
+
+This stage must be done manually for now!
+
+* Run the playbook with the `--tags web` option
+  * `$ ansible-playbook -i ./inventory ./main.yml --tags web`
+* SSH to the server and configure a site `mail.mydomain.xyz`
+* Setup `A` and `AAA` DNS records for your mail subdomain
+  * Allow some time for your ISP's DNS servers to update (this can take up to
+  several hours)
+* On the server, run `$ certbot --nginx` and follow the prompts to generate a
+certificate for your mail site
+
 ### Run the playbook
 
 * Open a terminal in this directory
 * `$ ansible-playbook -i ./inventory ./main.yml`
   * You may have to specify `--ask-become-pass` if you get a permission error
+
+### Setup DNS records
+
+You will need to setup 3 DNS TXT records for your mail to be routed correctly.
+These are placed in `/root/dns_TXT` by default, one per line
