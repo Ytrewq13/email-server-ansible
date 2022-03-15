@@ -1,9 +1,9 @@
-# My digitalocean droplet
-[droplet]
-159.65.60.204
+# Your server (not tested with IPv6)
+[server]
+SERVER.IPV4.ADDRESS
 
 [multi:children]
-droplet
+server
 
 # Variables for all the servers
 [multi:vars]
